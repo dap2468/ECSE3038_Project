@@ -29,12 +29,15 @@ db = client.status_database
 pydantic.json.ENCODERS_BY_TYPE[ObjectId]=str
 
 
+###########################################################################################################################
+#                                           FUNCTION
+###########################################################################################################################
 #SUNSET FUNCTION
 def sunset():
     get_sunset=requests.get(f'https://api.sunrise-sunset.org/json?lat=18.1096&lng=-77.2975&date=today')
     s_json = get_sunset.json()
-    time_date = s_json["results"]["sunset"] #Returns Sunset in UTC Time
-    time_date = datetime.strptime(time_date,'%I:%M:%S %p') + timedelta(hours=-5) #Converting form UTC to GMT-5 (Our Timezone)
+    time_date = s_json["results"]["sunset"] 
+    time_date = datetime.strptime(time_date,'%I:%M:%S %p') + timedelta(hours=-5)
     time_date = datetime.strftime(time_date,'%H:%M:%S') 
     return time_date
 
@@ -51,6 +54,50 @@ def parse_time(time_str):
         if param:
             time_params[name] = int(param)
     return timedelta(**time_params)
+
+
+
+###########################################################################################################################
+#                                           Webpage REQUESTS
+###########################################################################################################################
+
+#GET
+@app.get("/graph", status_code=200)
+async def graphpoints(request:Request,size: int):
+    n = size
+    list_of_status = await db["status"].find().sort("datetime",-1).to_list(n)
+    list_of_status.reverse()
+    return list_of_status
+
+#PUT
+@app.put("/settings",status_code=200)
+async def setting(request:Request):
+    
+    setting = await request.json()
+    variables = await db["settings"].find().to_list(1)
+    modified = {}
+    modified["user_temp"]=setting["user_temp"]
+    if setting["user_light"]== "sunset":
+        time=sunset()
+    else:
+        time = setting["user_light"]
+    
+    modified["user_light"]= (datetime.now().date()).strftime("%Y-%m-%dT")+time
+    modified["light_time_off"]= ((datetime.strptime(modified["user_light"],'%Y-%m-%dT%H:%M:%S')+parse_time(setting["light_duration"])).strftime('%Y-%m-%dT%H:%M:%S'))
+
+    if len(variables)==0:
+         new_setting = await db["settings"].insert_one(modified)
+         fixed = await db["settings"].find_one({"_id": new_setting.inserted_id })
+         return fixed
+    else:
+        id=variables[0]["_id"]
+        updated= await db["settings"].update_one({"_id":id},{"$set": modified})
+        fixed = await db["settings"].find_one({"_id": id})
+        if updated.modified_count>=1: 
+            return fixed
+    raise HTTPException(status_code=400,detail="Server cannot process the request due to something that is perceived to be a client error")
+
+
 
 ###########################################################################################################################
 #                                           ESP REQUESTS
@@ -79,7 +126,7 @@ async def getstate():
     dis_sensor = status_now[0]["presence"]
     time=datetime.strptime(datetime.strftime(datetime.now()+timedelta(hours=-5),'%H:%M:%S'),'%H:%M:%S')
     user_time=datetime.strptime(settings_now[0]["user_light"],'%H:%M:%S')
-    off_time=datetime.strptime(settings_now[0]["light_off_time"],'%H:%M:%S')
+    off_time=datetime.strptime(settings_now[0]["light_time_off"],'%H:%M:%S')
 
     fan = ((float(status_now[0]["temperature"])>float(settings_now[0]["user_temp"])) and dis_sensor)
     light = (time>user_time) and (dis_sensor) and (time<off_time)
@@ -89,45 +136,6 @@ async def getstate():
 
 
 
-###########################################################################################################################
-#                                           Webpage REQUESTS
-###########################################################################################################################
-
-#GET
-@app.get("/graph", status_code=200)
-async def graphpoints(request:Request,size: int):
-    n = size
-    list_of_status = await db["status"].find().sort("datetime",-1).to_list(n)
-    list_of_status.reverse()
-    return list_of_status
-
-#PUT
-@app.put("/settings",status_code=200)
-async def setting(request:Request):
-    
-    setting = await request.json()
-    variables = await db["settings"].find().to_list(1)
-    modified = {}
-    modified["user_temp"]=setting["user_temp"]
-    if setting["user_light"]== "sunset":
-        modified["user_light"]=sunset()
-    else:
-        modified["user_light"] = setting["user_light"]
-    
-    modified["light_off_time"]= (datetime.strptime(modified["user_light"],'%H:%M:%S')+parse_time(setting["light_duration"])).strftime("%H:%M:%S")
-    
-
-    if len(variables)==0:
-         new_setting = await db["settings"].insert_one(modified)
-         patched_setting = await db["settings"].find_one({"_id": new_setting.inserted_id })
-         return patched_setting
-    else:
-        id=variables[0]["_id"]
-        updated_setting= await db["settings"].update_one({"_id":id},{"$set": modified})
-        patched_setting = await db["settings"].find_one({"_id": id})
-        if updated_setting.modified_count>=1: 
-            return patched_setting
-    raise HTTPException(status_code=400,detail="Server cannot process the request due to something that is perceived to be a client error")
 
 
 

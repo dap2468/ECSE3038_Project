@@ -9,10 +9,17 @@
 #define light 21
 #define fan 19
 #define dis_sensor 3
-#define temp_sensor 2
 
-OneWire oneWire(temp_sensor);	
+
+// GPIO where the DS18B20 is connected to
+const int oneWireBus = 4;     
+
+// Setup a oneWire instance to communicate with any OneWire devices
+OneWire oneWire(oneWireBus);
+
+// Pass our oneWire reference to Dallas Temperature sensor 
 DallasTemperature sensors(&oneWire);
+
 
 
 
@@ -21,9 +28,11 @@ void setup() {
   pinMode(light, OUTPUT);
   pinMode(fan, OUTPUT);
   pinMode(dis_sensor, INPUT);
-  pinMode(temp_sensor,INPUT);
+  
 
   Serial.begin(9600);
+  sensors.begin();
+  
   WiFi.begin(WIFI_SSID,WIFI_PASS);
 
   Serial.println("Connecting");
